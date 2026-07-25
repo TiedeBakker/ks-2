@@ -61,20 +61,15 @@ export const relationValues = sqliteTable("relation_values", {
 
   relationId: text("relation_id")
     .notNull()
-    .references(() => relations.id),
+    .references(() => relations.id), // Deze mag blijven als relations op beide DB's staat
 
-  sourceId: text("source_id")
-    .notNull()
-    .references(() => objects.id),
-
-  targetId: text("target_id")
-    .notNull()
-    .references(() => objects.id),
+  // WEGGEHAALD: .references(() => objects.id)
+  // Dit zijn nu "Soft Keys". De applicatie (hybridDb) borgt de geldigheid!
+  sourceId: text("source_id").notNull(),
+  targetId: text("target_id").notNull(),
 
   volgorde: text("volgorde"),
 
-  // Vertrouwelijkheid: 0 = Publiek, 1 = Vertrouwelijk
-  // Wordt automatisch true als sourceId óf targetId vertrouwelijk is!
   isConfidential: integer("is_confidential", { mode: "boolean" })
     .notNull()
     .default(false),

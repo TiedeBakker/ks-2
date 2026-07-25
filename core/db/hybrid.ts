@@ -1,41 +1,49 @@
 // src/core/db/hybrid.ts
 
-import { eq, or, inArray } from "drizzle-orm";
 import { publicDb, localDb, isLocalDbAvailable } from "./clients";
 import * as schema from "./schema";
+import { eq, inArray, or } from "drizzle-orm";
+
+/**
+ * Helper om de juiste database-instantie te kiezen:
+ * Als het vertrouwelijk is én localDb is beschikbaar -> localDb
+ * Anders -> publicDb
+ */
+function getDb(isConfidential: boolean) {
+  if (isConfidential && isLocalDbAvailable() && localDb) {
+    return localDb;
+  }
+  return publicDb;
+}
 
 export const hybridDb = {
   /**
-   * LEZEN: Haalt een object op op basis van ID.
-   * Zoekt eerst lokaal (als dat kan) en anders in Turso.
+   * Haalt één object op op basis van ID (zoekt eerst lokaal, dan publiek)
    */
   async getObjectById(id: string) {
-    // 1. Probeer lokaal te zoeken als de lokale DB beschikbaar is
     if (isLocalDbAvailable() && localDb) {
-      const localResult = await localDb
+      const localObj = await localDb
         .select()
         .from(schema.objects)
         .where(eq(schema.objects.id, id))
         .get();
-
-      if (localResult) return localResult;
+      if (localObj) return localObj;
     }
 
-    // 2. Zoek in de publieke Turso DB
-    return await publicDb
+    const publicObj = await publicDb
       .select()
       .from(schema.objects)
       .where(eq(schema.objects.id, id))
       .get();
+
+    return publicObj || null;
   },
 
   /**
-   * LEZEN: Haalt alle relaties op voor een specifiek object (zowel inkomend als uitgaand).
-   * Combineert resultaten uit Turso én de lokale DB als die beschikbaar is.
+   * Haalt alle relaties op waarin dit object betrokken is (als source OF target)
    */
   async getRelationsForObject(objectId: string) {
-    // Haal publieke relaties op
-    const publicRelationsPromise = publicDb
+    const publicRelations = await publicDb
       .select()
       .from(schema.relationValues)
       .where(
@@ -45,76 +53,191 @@ export const hybridDb = {
         )
       );
 
-    // Haal vertrouwelijke relaties op (indien lokaal beschikbaar)
-    const localRelationsPromise =
-      isLocalDbAvailable() && localDb
-        ? localDb
-            .select()
-            .from(schema.relationValues)
-            .where(
-              or(
-                eq(schema.relationValues.sourceId, objectId),
-                eq(schema.relationValues.targetId, objectId)
-              )
-            )
-        : Promise.resolve([]);
-
-    // Voer beide query's parallel uit
-    const [publicRelations, localRelations] = await Promise.all([
-      publicRelationsPromise,
-      localRelationsPromise,
-    ]);
-
-    // Combineer de lijsten
-    return [...publicRelations, ...localRelations];
-  },
-
-  /**
-   * SCHRIJVEN: Slaat een nieuw object op in de juiste database.
-   * Bepaalt automatisch de bestemming op basis van `isConfidential`.
-   */
-  async createObject(data: typeof schema.objects.$inferInsert) {
-    if (data.isConfidential) {
-      if (!isLocalDbAvailable() || !localDb) {
-        throw new Error(
-          "Kan geen vertrouwelijk object opslaan: Lokale database is niet beschikbaar."
+    let localRelations: typeof publicRelations = [];
+    if (isLocalDbAvailable() && localDb) {
+      localRelations = await localDb
+        .select()
+        .from(schema.relationValues)
+        .where(
+          or(
+            eq(schema.relationValues.sourceId, objectId),
+            eq(schema.relationValues.targetId, objectId)
+          )
         );
-      }
-      return await localDb.insert(schema.objects).values(data).returning();
-    } else {
-      return await publicDb.insert(schema.objects).values(data).returning();
     }
+
+    // Combineer en verwijder eventuele dubbelen op basis van ID
+    const relationMap = new Map<string, (typeof publicRelations)[number]>();
+    [...publicRelations, ...localRelations].forEach((rel) => {
+      relationMap.set(rel.id, rel);
+    });
+
+    return Array.from(relationMap.values());
   },
 
   /**
-   * LEZEN: Haalt meerdere objecten tegelijk op (handig bij graph traversal).
+   * Haalt meerdere objecten tegelijk op via hun ID's
    */
   async getObjectsByIds(ids: string[]) {
     if (ids.length === 0) return [];
 
-    const publicObjectsPromise = publicDb
+    const publicObjects = await publicDb
       .select()
       .from(schema.objects)
       .where(inArray(schema.objects.id, ids));
 
-    const localObjectsPromise =
-      isLocalDbAvailable() && localDb
-        ? localDb
-            .select()
-            .from(schema.objects)
-            .where(inArray(schema.objects.id, ids))
-        : Promise.resolve([]);
+    let localObjects: typeof publicObjects = [];
+    if (isLocalDbAvailable() && localDb) {
+      localObjects = await localDb
+        .select()
+        .from(schema.objects)
+        .where(inArray(schema.objects.id, ids));
+    }
 
-    const [publicObjects, localObjects] = await Promise.all([
-      publicObjectsPromise,
-      localObjectsPromise,
-    ]);
-
-    // Maak een Map om dubbelingen te voorkomen (lokaal heeft voorrang als ID overlapt)
-    const objectMap = new Map();
-    publicObjects.forEach((obj) => objectMap.set(obj.id, obj));
-    localObjects.forEach((obj) => objectMap.set(obj.id, obj));
+    const objectMap = new Map<string, (typeof publicObjects)[number]>();
+    [...publicObjects, ...localObjects].forEach((obj) => {
+      objectMap.set(obj.id, obj);
+    });
 
     return Array.from(objectMap.values());
+  },
+
+  /**
+   * Haalt alle objecten op uit zowel de publieke (Turso) als lokale (SQLite) DB.
+   */
+  async getAllObjects() {
+    const publicObjects = await publicDb.select().from(schema.objects);
+
+    let localObjects: typeof publicObjects = [];
+    if (isLocalDbAvailable() && localDb) {
+      localObjects = await localDb.select().from(schema.objects);
+    }
+
+    const objectMap = new Map<string, (typeof publicObjects)[number]>();
+    [...publicObjects, ...localObjects].forEach((obj) => {
+      objectMap.set(obj.id, obj);
+    });
+
+    return Array.from(objectMap.values());
+  },
+
+  /**
+   * Maakt een nieuw object aan (Publiek in Turso of Vertrouwelijk in lokale SQLite)
+   */
+  async createObject(
+    data: Omit<typeof schema.objects.$inferInsert, "id"> & { id?: string }
+  ) {
+    const isConfidential = data.isConfidential ?? false;
+    const db = getDb(isConfidential);
+
+    const newId = data.id || crypto.randomUUID();
+
+    const result = await db
+      .insert(schema.objects)
+      .values({
+        ...data,
+        id: newId,
+      })
+      .returning();
+
+    return result[0];
+  },
+
+  /**
+   * Maakt een nieuwe relatie aan
+   */
+  async createRelation(
+    data: Omit<typeof schema.relationValues.$inferInsert, "id" | "relationId"> & {
+      id?: string;
+      relationId?: string;
+    }
+  ) {
+    // 1. Controleer IN DE CODE of bron en doel bestaan (Hybride check)
+    const sourceObj = await this.getObjectById(data.sourceId);
+    const targetObj = await this.getObjectById(data.targetId);
+
+    if (!sourceObj || !targetObj) {
+      throw new Error(
+        `Kan relatie niet aanmaken: Bron (${data.sourceId}) of Doel (${data.targetId}) bestaat niet.`
+      );
+    }
+
+    // 2. Bepaal opslaglocatie (Vertrouwelijk = lokaal, Publiek = Turso)
+    const isConfidential = Boolean(
+      sourceObj.isConfidential || targetObj.isConfidential
+    );
+    const db = getDb(isConfidential);
+
+    // 3. Waarborg dat het relatietype bestaat op deze DB
+    const relationTypeId = data.relationId || "default-relatie-type";
+    const existingType = await db
+      .select()
+      .from(schema.relations)
+      .where(eq(schema.relations.id, relationTypeId))
+      .get();
+
+    if (!existingType) {
+      await db.insert(schema.relations).values({
+        id: relationTypeId,
+        label: "Standaard Relatie",
+      });
+    }
+
+    // 4. Opslaan! SQLite doet geen moeilijke FK check op sourceId/targetId
+    const newId = data.id || crypto.randomUUID();
+    const result = await db
+      .insert(schema.relationValues)
+      .values({
+        ...data,
+        id: newId,
+        relationId: relationTypeId,
+        isConfidential,
+      })
+      .returning();
+
+    return result[0];
+  },
+
+  /**
+   * Nieuw: Bouwt de complete graaf (ingaand + uitgaand) op voor één specifiek object.
+   */
+  async getGraphForObject(objectId: string) {
+    const startObject = await this.getObjectById(objectId);
+    if (!startObject) return null;
+
+    // Haal alle relaties op via de hybride helper
+    const allRelations = await this.getRelationsForObject(objectId);
+
+    // Verzamel unieke IDs van gerelateerde objecten
+    const relatedObjectIds = new Set<string>();
+    allRelations.forEach((rel) => {
+      if (rel.sourceId !== objectId) relatedObjectIds.add(rel.sourceId);
+      if (rel.targetId !== objectId) relatedObjectIds.add(rel.targetId);
+    });
+
+    // Haal de gekoppelde objecten op
+    const relatedObjects = await this.getObjectsByIds(Array.from(relatedObjectIds));
+    const relatedObjectsMap = new Map(relatedObjects.map((obj) => [obj.id, obj]));
+
+    // Splits op in uitgaand en ingaand
+    const outgoing = allRelations
+      .filter((rel) => rel.sourceId === objectId)
+      .map((rel) => ({
+        relation: rel,
+        targetObject: relatedObjectsMap.get(rel.targetId),
+      }));
+
+    const incoming = allRelations
+      .filter((rel) => rel.targetId === objectId)
+      .map((rel) => ({
+        relation: rel,
+        sourceObject: relatedObjectsMap.get(rel.sourceId),
+      }));
+
+    return {
+      object: startObject,
+      outgoing,
+      incoming,
+    };
   },
 };
