@@ -56,3 +56,9 @@ K-S-2
 │    Turso Client     │                          │  Lokale DB Client   │
 │  (Publieke Cloud)   │                          │ (SQLite op je PC)   │
 └─────────────────────┘                          └─────────────────────┘
+
+Commentaar:
+# scherm: actuele object bewerken
+- label van object wil ik ook kunnen aanpassen
+- Scherm is op pc te smal, selectievenster voor objecten is maar één tot enkele karakters breed;
+schuifbaar maken?

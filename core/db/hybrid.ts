@@ -144,6 +144,29 @@ export const hybridDb = {
   },
 
   /**
+   * Werkt een bestaand object bij (in de juiste DB op basis van isConfidential)
+   */
+  async updateObject(
+    id: string,
+    data: Partial<Omit<typeof schema.objects.$inferInsert, "id">>
+  ) {
+    const existing = await this.getObjectById(id);
+    if (!existing) {
+      throw new Error(`Object met ID ${id} niet gevonden.`);
+    }
+
+    const db = getDb(existing.isConfidential ?? false);
+
+    const result = await db
+      .update(schema.objects)
+      .set(data)
+      .where(eq(schema.objects.id, id))
+      .returning();
+
+    return result[0];
+  },
+
+  /**
    * Maakt een nieuwe relatie aan (Hybride afgehandeld)
    */
   async createRelation(
