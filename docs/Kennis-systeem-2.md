@@ -31,6 +31,7 @@ New Terminal:
 - npm install -D drizzle-kit
 - npm install uuid
 - npm install --save-dev @types/uuid
+- npm install framer-motion
 
 ### Koppeling GitHub
 - maak op GitHub nieuwe repository aan ks-2

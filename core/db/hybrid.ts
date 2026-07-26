@@ -144,7 +144,7 @@ export const hybridDb = {
   },
 
   /**
-   * Maakt een nieuwe relatie aan
+   * Maakt een nieuwe relatie aan (Hybride afgehandeld)
    */
   async createRelation(
     data: Omit<typeof schema.relationValues.$inferInsert, "id" | "relationId"> & {
@@ -183,7 +183,7 @@ export const hybridDb = {
       });
     }
 
-    // 4. Opslaan! SQLite doet geen moeilijke FK check op sourceId/targetId
+    // 4. Opslaan
     const newId = data.id || crypto.randomUUID();
     const result = await db
       .insert(schema.relationValues)
@@ -199,7 +199,7 @@ export const hybridDb = {
   },
 
   /**
-   * Nieuw: Bouwt de complete graaf (ingaand + uitgaand) op voor één specifiek object.
+   * Bouwt de complete graaf (ingaand + uitgaand) op voor één specifiek object.
    */
   async getGraphForObject(objectId: string) {
     const startObject = await this.getObjectById(objectId);
@@ -239,5 +239,18 @@ export const hybridDb = {
       outgoing,
       incoming,
     };
+  },
+
+  // --- RELATIE TYPES (relations catalogus) ---
+  async getRelationTypes() {
+    // Relatietypes worden opgehaald uit de publieke/lokale DB
+    const db = getDb(false);
+    return await db.select().from(schema.relations);
+  },
+
+  async createRelationType(input: { id: string; label: string }) {
+    const db = getDb(false);
+    const [created] = await db.insert(schema.relations).values(input).returning();
+    return created;
   },
 };

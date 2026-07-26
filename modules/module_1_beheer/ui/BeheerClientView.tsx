@@ -44,6 +44,11 @@ export function BeheerClientView({
         // Na aanmaken direct navigeren naar het nieuwe object
         router.push(`/beheer?id=${newObjectId}`);
     };
+    // Veramel alle ID's van objecten die al in de ingaande/uitgaande keten van het actieve object zitten
+    const existingRelatedIds = graphData ? [
+        ...graphData.incomingChain.map((n) => n.object.id),
+        ...graphData.outgoingChain.map((n) => n.object.id),
+    ] : [];
 
     return (
         <main className="max-w-4xl mx-auto px-6 py-8 flex-1 w-full space-y-6">
@@ -205,10 +210,17 @@ export function BeheerClientView({
             />
 
             {/* SLIDE-OVER DRAWER (Raadpleeg / Beheer venster) */}
+           // En geef ze mee aan ObjectDetailDrawer:
             <ObjectDetailDrawer
                 isOpen={isDrawerOpen}
                 onClose={() => setIsDrawerOpen(false)}
                 object={graphData?.currentObject || null}
+                allObjects={allObjects}
+                existingRelatedIds={existingRelatedIds}
+                onRelationCreated={() => {
+                    // Scherm verversen na aanmaken relatie
+                    router.refresh();
+                }}
             />
         </main>
     );
