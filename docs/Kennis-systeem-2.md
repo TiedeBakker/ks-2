@@ -29,6 +29,8 @@ New Terminal:
 - npx create-next-app@latest .
 - npm install @libsql/client drizzle-orm dotenv
 - npm install -D drizzle-kit
+- npm install uuid
+- npm install --save-dev @types/uuid
 
 ### Koppeling GitHub
 - maak op GitHub nieuwe repository aan ks-2

@@ -3,14 +3,15 @@
 
 import { hybridDb } from "@/core/db/hybrid";
 import { revalidatePath } from "next/cache";
+import { v7 as uuidv7 } from "uuid";
 
 export interface CreateObjectInput {
   label: string;
-  validFrom?: string; // ISO string of YYYY-MM-DDTHH:mm
+  validFrom?: string; // ISO string
   isConfidential: boolean;
-  // Optionele relatie-koppeling (voor toekomstige stappen)
+  // Optionele relatie-koppeling
   relatedObjectId?: string;
-  relationDirection?: "INCOMING" | "OUTGOING"; // INCOMING = source -> new, OUTGOING = new -> target
+  relationDirection?: "INCOMING" | "OUTGOING";
 }
 
 export async function createObjectAction(input: CreateObjectInput) {
@@ -19,8 +20,8 @@ export async function createObjectAction(input: CreateObjectInput) {
       return { success: false, error: "Label is verplicht." };
     }
 
-    // 1. Unieke ID genereren
-    const id = `obj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    // 1. Unieke UUIDv7 genereren
+    const id = uuidv7();
     const validFrom = input.validFrom || new Date().toISOString();
 
     // 2. Sla het object op via hybridDb
@@ -31,9 +32,9 @@ export async function createObjectAction(input: CreateObjectInput) {
       isConfidential: input.isConfidential,
     });
 
-    // 3. Optioneel: Maak direct een relatie aan als er een gerelateerd object is meegegeven
+    // 3. Directe relatie-koppeling als er een gerelateerd object is meegegeven
     if (input.relatedObjectId && input.relationDirection) {
-      const relId = `rel_${Date.now()}`;
+      const relId = uuidv7();
       if (input.relationDirection === "INCOMING") {
         // relatedObjectId -> newObj.id
         await hybridDb.createRelation({
