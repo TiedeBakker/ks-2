@@ -220,10 +220,58 @@ export const hybridDb = {
 
     return result[0];
   },
+  // Voeg deze functie toe aan het hybridDb object in src/core/db/hybrid.ts:
 
+  /**
+   * Haalt alle actieve uitgaande relaties op voor een sourceId,
+   * inclusief de target-object gegevens.
+   */
+  // In src/core/db/hybrid.ts -> getOutgoingRelationsForObject:
+
+  async getOutgoingRelationsForObject(sourceId: string) {
+    // 1. Haal alle relaties op van dit object
+    const allRelations = await this.getRelationsForObject(sourceId);
+
+    // 2. Filter alleen UITGAANDE relaties die nog actueel zijn
+    const now = new Date();
+    const activeOutgoing = allRelations.filter(
+      (rel) => rel.sourceId === sourceId && (!rel.validTo || new Date(rel.validTo) > now)
+    );
+
+    if (activeOutgoing.length === 0) return [];
+
+    // 3. SORTEER OP VOLGORDE (Numeriek sorteren als tekst/null)
+    activeOutgoing.sort((a, b) => {
+      const valA = a.volgorde !== null && a.volgorde !== undefined && a.volgorde !== "" ? parseInt(a.volgorde, 10) : Infinity;
+      const valB = b.volgorde !== null && b.volgorde !== undefined && b.volgorde !== "" ? parseInt(b.volgorde, 10) : Infinity;
+
+      // Vergelijk de nummers (Infinity komt onderaan te staan)
+      return valA - valB;
+    });
+
+    // 4. Haal de doelobjecten op
+    const targetIds = activeOutgoing.map((rel) => rel.targetId);
+    const targetObjects = await this.getObjectsByIds(targetIds);
+    const targetMap = new Map(targetObjects.map((obj) => [obj.id, obj]));
+
+    // 5. Geef het gesorteerde resultaat gecombineerd terug
+    return activeOutgoing.map((rel) => ({
+      relationValueId: rel.id,
+      relationId: rel.relationId,
+      validFrom: rel.validFrom || null,
+      validTo: rel.validTo || null,
+      volgorde: rel.volgorde || null,
+      targetObject: targetMap.get(rel.targetId) || {
+        id: rel.targetId,
+        label: "Onbekend object",
+      },
+    }));
+  },
   /**
    * Bouwt de complete graaf (ingaand + uitgaand) op voor één specifiek object.
    */
+  // In src/core/db/hybrid.ts -> getGraphForObject:
+
   async getGraphForObject(objectId: string) {
     const startObject = await this.getObjectById(objectId);
     if (!startObject) return null;
@@ -242,11 +290,24 @@ export const hybridDb = {
     const relatedObjects = await this.getObjectsByIds(Array.from(relatedObjectIds));
     const relatedObjectsMap = new Map(relatedObjects.map((obj) => [obj.id, obj]));
 
-    // Splits op in uitgaand en ingaand
+    // Helper functie om te sorteren op volgorde
+    const sortByVolgorde = (a: typeof allRelations[0], b: typeof allRelations[0]) => {
+      const valA = a.volgorde !== null && a.volgorde !== undefined && a.volgorde !== "" ? parseInt(a.volgorde, 10) : Infinity;
+      const valB = b.volgorde !== null && b.volgorde !== undefined && b.volgorde !== "" ? parseInt(b.volgorde, 10) : Infinity;
+      return valA - valB;
+    };
+
+    // Splits op in uitgaand en ingaand + SORTEER UITGAAND
     const outgoing = allRelations
       .filter((rel) => rel.sourceId === objectId)
       .map((rel) => ({
-        relation: rel,
+        relation: {
+          id: rel.id,
+          relationId: rel.relationId,
+          volgorde: rel.volgorde ?? null, // <-- ZORG DAT DEZE ERIN STAAT
+          validFrom: rel.validFrom,
+          validTo: rel.validTo,
+        },
         targetObject: relatedObjectsMap.get(rel.targetId),
       }));
 
@@ -263,7 +324,6 @@ export const hybridDb = {
       incoming,
     };
   },
-
   // --- RELATIE TYPES (relations catalogus) ---
   async getRelationTypes() {
     // Relatietypes worden opgehaald uit de publieke/lokale DB
@@ -275,5 +335,29 @@ export const hybridDb = {
     const db = getDb(false);
     const [created] = await db.insert(schema.relations).values(input).returning();
     return created;
+  },
+  /**
+   * Werkt een specifieke relatiewaarde bij (bijv. validFrom, relationId of validTo)
+   */
+  async updateRelationValue(
+    id: string,
+    data: Partial<typeof schema.relationValues.$inferInsert>
+  ) {
+    // Zoek eerst op waar deze relatie staat
+    const publicRel = await publicDb
+      .select()
+      .from(schema.relationValues)
+      .where(eq(schema.relationValues.id, id))
+      .get();
+
+    const db = publicRel ? publicDb : (localDb || publicDb);
+
+    const result = await db
+      .update(schema.relationValues)
+      .set(data)
+      .where(eq(schema.relationValues.id, id))
+      .returning();
+
+    return result[0];
   },
 };
