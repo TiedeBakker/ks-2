@@ -360,4 +360,12 @@ export const hybridDb = {
 
     return result[0];
   },
+
+  /**
+   * Haalt alle objecttypes op uit de database
+   */
+  async getObjectTypes() {
+    const db = getDb(false); // Gebruik de standaard publieke DB
+    return await db.select().from(schema.objectTypes);
+  },
 };

@@ -28,6 +28,7 @@ export async function createObjectAction(input: CreateObjectInput) {
     const newObj = await hybridDb.createObject({
       id,
       label: input.label.trim(),
+      objectTypeId: input.objectTypeId,
       validFrom,
       isConfidential: input.isConfidential,
     });
@@ -63,3 +64,24 @@ export async function createObjectAction(input: CreateObjectInput) {
     return { success: false, error: error.message || "Er is een fout opgetreden." };
   }
 }
+/**
+ * Haalt alle beschikbare objecttypen op uit de database
+ */
+export async function getObjectTypesAction() {
+  try {
+    const types = await hybridDb.getObjectTypes();
+    return { success: true, data: types };
+  } catch (error: any) {
+    console.error("Fout bij ophalen objecttypen:", error);
+    return { success: false, data: [] };
+  }
+}
+export interface CreateObjectInput {
+  label: string;
+  objectTypeId?: string; // <-- VOEG DIT VELD TOE
+  validFrom?: string;
+  isConfidential: boolean;
+  relatedObjectId?: string;
+  relationDirection?: "INCOMING" | "OUTGOING";
+}
+

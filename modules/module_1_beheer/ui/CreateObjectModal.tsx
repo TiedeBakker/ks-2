@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
-import { createObjectAction } from "../actions/createObject";
+import { createObjectAction, getObjectTypesAction, } from "../actions/createObject";
 
 interface CreateObjectModalProps {
   isOpen: boolean;
@@ -35,6 +35,8 @@ export function CreateObjectModal({
   const [isVercel, setIsVercel] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [objectTypeId, setObjectTypeId] = useState<string>("");
+  const [objectTypes, setObjectTypes] = useState<{ id: string; label: string }[]>([]);
 
   // Check of de app op Vercel / productie draait
   useEffect(() => {
@@ -48,6 +50,20 @@ export function CreateObjectModal({
       }
     }
   }, []);
+
+  // Laad objecttypes wanneer de modal opent
+  useEffect(() => {
+    if (isOpen) {
+      getObjectTypesAction().then((res) => {
+        if (res.success && res.data) {
+          setObjectTypes(res.data);
+          if (res.data.length > 0) {
+            setObjectTypeId(res.data[0].id); // Selecteer standaard het eerste type
+          }
+        }
+      });
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -64,6 +80,7 @@ export function CreateObjectModal({
 
     const result = await createObjectAction({
       label,
+      objectTypeId, // <-- VOEG DIT TOE
       validFrom: new Date(validFrom).toISOString(),
       isConfidential: isVercel ? false : isConfidential,
       relatedObjectId,
@@ -83,6 +100,7 @@ export function CreateObjectModal({
       setErrorMessage(result.error || "Fout bij opslaan.");
     }
   };
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -128,6 +146,23 @@ export function CreateObjectModal({
               className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+          {/* VELD: OBJECT TYPE */}
+          <div>
+            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
+              Object Type
+            </label>
+            <select
+              value={objectTypeId}
+              onChange={(e) => setObjectTypeId(e.target.value)}
+              className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              {objectTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* VELD 2: VALID FROM */}
           <div>
@@ -160,11 +195,10 @@ export function CreateObjectModal({
               </label>
 
               <label
-                className={`flex items-center gap-2 text-sm ${
-                  isVercel
-                    ? "opacity-50 cursor-not-allowed text-slate-400"
-                    : "cursor-pointer text-slate-700"
-                }`}
+                className={`flex items-center gap-2 text-sm ${isVercel
+                  ? "opacity-50 cursor-not-allowed text-slate-400"
+                  : "cursor-pointer text-slate-700"
+                  }`}
               >
                 <input
                   type="radio"
